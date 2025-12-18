@@ -1,76 +1,121 @@
 const express = require("express");
 const cors = require("cors");
+const { Pool } = require("pg");
 
 const app = express();
-
-// ✅ IMPORTANT for Render: use process.env.PORT
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
 
-// In-memory products (prototype DB)
-let productos = [
-  { id: 1, nombre: "The Witcher 3", descripcion: "RPG mundo abierto", precio: 19990, imagenUrl: "https://example.com/witcher3.jpg" },
-  { id: 2, nombre: "Elden Ring", descripcion: "Acción-RPG", precio: 29990, imagenUrl: "https://example.com/eldenring.jpg" }
-];
-
-let nextId = 3;
-
-// simple health check
-app.get("/ping", (req, res) => res.json({ ok: true, message: "pong" }));
-
-// GET /productos
-app.get("/productos", (req, res) => res.json(productos));
-
-// GET /productos/:id
-app.get("/productos/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const p = productos.find(x => x.id === id);
-  if (!p) return res.status(404).json({ error: "Producto no encontrado" });
-  res.json(p);
+// ❗ Hardcoded Postgres connection (TEMPORARY)
+const pool = new Pool({
+  connectionString: "postgresql://gameapp_user:zfmTWrckSwQZuC7958H94f4pMikUiwvx@dpg-d51peu15pdvs73edcj4g-a/gameapp",
+  ssl: { rejectUnauthorized: false }
 });
 
-// POST /productos
-app.post("/productos", (req, res) => {
+// ------------------ TEST ROUTE ------------------
+app.get("/ping", async (req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    res.json({ ok: true, db: "connected" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ------------------ CRUD ------------------
+
+// GET all products
+app.get("/productos", async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, nombre, descripcion, precio,
+            imagen_url AS "imagenUrl"
+     FROM productos
+     ORDER BY id`
+  );
+  res.json(rows);
+});
+
+// GET product by id
+app.get("/productos/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows } = await pool.query(
+    `SELECT id, nombre, descripcion, precio,
+            imagen_url AS "imagenUrl"
+     FROM productos
+     WHERE id = $1`,
+    [id]
+  );
+
+  if (rows.length === 0) {
+    return res.status(404).json({ error: "Producto no encontrado" });
+  }
+
+  res.json(rows[0]);
+});
+
+// POST product
+app.post("/productos", async (req, res) => {
   const { nombre, descripcion, precio, imagenUrl } = req.body;
   const precioNum = parseInt(precio, 10) || 0;
 
-  const nuevo = { id: nextId++, nombre, descripcion, precio: precioNum, imagenUrl };
-  productos.push(nuevo);
+  const { rows } = await pool.query(
+    `INSERT INTO productos (nombre, descripcion, precio, imagen_url)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, nombre, descripcion, precio,
+               imagen_url AS "imagenUrl"`,
+    [nombre, descripcion, precioNum, imagenUrl]
+  );
 
-  res.status(201).json(nuevo);
+  res.status(201).json(rows[0]);
 });
 
-// PUT /productos  (id viene en el body, como tu interfaz)
-app.put("/productos", (req, res) => {
+// PUT product
+app.put("/productos", async (req, res) => {
   const { id, nombre, descripcion, precio, imagenUrl } = req.body;
-  const idx = productos.findIndex(x => x.id === id);
-  if (idx === -1) return res.status(404).json({ error: "Producto no encontrado" });
+  const precioNum = parseInt(precio, 10);
 
-  const precioNum = precio !== undefined ? (parseInt(precio, 10) || productos[idx].precio) : productos[idx].precio;
+  const { rows } = await pool.query(
+    `UPDATE productos
+     SET nombre = $2,
+         descripcion = $3,
+         precio = $4,
+         imagen_url = $5
+     WHERE id = $1
+     RETURNING id, nombre, descripcion, precio,
+               imagen_url AS "imagenUrl"`,
+    [id, nombre, descripcion, precioNum, imagenUrl]
+  );
 
-  productos[idx] = {
-    ...productos[idx],
-    nombre: nombre ?? productos[idx].nombre,
-    descripcion: descripcion ?? productos[idx].descripcion,
-    precio: precioNum,
-    imagenUrl: imagenUrl ?? productos[idx].imagenUrl
-  };
+  if (rows.length === 0) {
+    return res.status(404).json({ error: "Producto no encontrado" });
+  }
 
-  res.json(productos[idx]);
+  res.json(rows[0]);
 });
 
-// DELETE /productos/:id
-app.delete("/productos/:id", (req, res) => {
+// DELETE product
+app.delete("/productos/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const idx = productos.findIndex(x => x.id === id);
-  if (idx === -1) return res.status(404).json({ error: "Producto no encontrado" });
 
-  const eliminado = productos.splice(idx, 1)[0];
-  res.json(eliminado);
+  const { rows } = await pool.query(
+    `DELETE FROM productos
+     WHERE id = $1
+     RETURNING id, nombre, descripcion, precio,
+               imagen_url AS "imagenUrl"`,
+    [id]
+  );
+
+  if (rows.length === 0) {
+    return res.status(404).json({ error: "Producto no encontrado" });
+  }
+
+  res.json(rows[0]);
 });
 
+// ------------------ START SERVER ------------------
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ API up on port ${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
