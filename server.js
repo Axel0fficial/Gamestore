@@ -14,24 +14,37 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ------------------ TEST ROUTE ------------------
+// ✅ Auto-create table if missing
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS productos (
+      id SERIAL PRIMARY KEY,
+      nombre TEXT NOT NULL,
+      descripcion TEXT NOT NULL,
+      precio INT NOT NULL,
+      imagen_url TEXT NOT NULL
+    );
+  `);
+  console.log("✅ DB ready: table productos exists");
+}
+
+initDb().catch((e) => {
+  console.error("❌ DB init failed:", e);
+  process.exit(1);
+});
+
 app.get("/ping", async (req, res) => {
   try {
     await pool.query("SELECT 1");
     res.json({ ok: true, db: "connected" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: err.message });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-// ------------------ CRUD ------------------
-
-// GET all products
 app.get("/productos", async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, nombre, descripcion, precio,
-            imagen_url AS "imagenUrl"
+    `SELECT id, nombre, descripcion, precio, imagen_url AS "imagenUrl"
      FROM productos
      ORDER BY id`
   );
@@ -117,5 +130,5 @@ app.delete("/productos/:id", async (req, res) => {
 
 // ------------------ START SERVER ------------------
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
